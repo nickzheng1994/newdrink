@@ -4,9 +4,13 @@
 
 ## 下载
 
-前往 GitHub Releases 下载最新版本：
+直接下载最新版：
 
-https://github.com/nickzheng1994/newdrink/releases/latest
+https://github.com/nickzheng1994/newdrink/raw/main/downloads/%E7%89%9B%E9%A9%AC%E8%A1%A5%E6%B0%B4%E7%AB%99-macOS.zip
+
+也可以前往 GitHub Releases 查看后续版本：
+
+https://github.com/nickzheng1994/newdrink/releases
 
 下载 `牛马补水站-macOS.zip` 后解压，双击 `牛马补水站.app` 即可运行。
 
