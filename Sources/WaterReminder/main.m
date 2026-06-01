@@ -987,7 +987,7 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
     NSView *view = DTGlassPanel(NSMakeRect(0, 0, 380, 450), 30);
     self.window.contentView = view;
 
-    NSButton *closeButton = [self buttonWithTitle:@"×" frame:NSMakeRect(20, 402, 34, 34) action:@selector(closePressed:)];
+    NSButton *closeButton = [self buttonWithTitle:@"×" frame:NSMakeRect(326, 402, 34, 34) action:@selector(closePressed:)];
     closeButton.bezelStyle = NSBezelStyleCircular;
     closeButton.font = [NSFont systemFontOfSize:18 weight:NSFontWeightBold];
     [view addSubview:closeButton];
@@ -1142,10 +1142,26 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
     return label;
 }
 
+- (NSButton *)buttonWithTitle:(NSString *)title frame:(NSRect)frame action:(SEL)action {
+    NSButton *button = [[NSButton alloc] initWithFrame:frame];
+    button.title = title;
+    button.target = self;
+    button.action = action;
+    button.bezelStyle = NSBezelStyleRounded;
+    button.appearance = [NSAppearance appearanceNamed:NSAppearanceNameAqua];
+    button.contentTintColor = DTPrimaryTextColor();
+    return button;
+}
+
 - (void)refresh {
     [self.model resetIfNeeded];
     NSView *view = DTGlassPanel(NSMakeRect(0, 0, 380, 460), 30);
     self.window.contentView = view;
+
+    NSButton *closeButton = [self buttonWithTitle:@"×" frame:NSMakeRect(326, 412, 34, 34) action:@selector(closePressed:)];
+    closeButton.bezelStyle = NSBezelStyleCircular;
+    closeButton.font = [NSFont systemFontOfSize:18 weight:NSFontWeightBold];
+    [view addSubview:closeButton];
 
     NSTextField *title = [self labelWithFrame:NSMakeRect(24, 412, 332, 28) font:[NSFont systemFontOfSize:21 weight:NSFontWeightBold] color:DTPrimaryTextColor() alignment:NSTextAlignmentCenter];
     title.stringValue = @"今天喝水统计";
@@ -1189,6 +1205,10 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
     note.maximumNumberOfLines = 2;
     note.stringValue = @"辛苦啦。今天的每一杯水，都是你认真照顾自己的证据。";
     [view addSubview:note];
+}
+
+- (void)closePressed:(id)sender {
+    [self close];
 }
 
 @end
@@ -1343,6 +1363,11 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
     NSView *view = DTGlassPanel(NSMakeRect(0, 0, 380, 430), 30);
     self.window.contentView = view;
 
+    NSButton *closeButton = [self buttonWithTitle:@"×" frame:NSMakeRect(326, 382, 34, 34) action:@selector(closePressed:)];
+    closeButton.bezelStyle = NSBezelStyleCircular;
+    closeButton.font = [NSFont systemFontOfSize:18 weight:NSFontWeightBold];
+    [view addSubview:closeButton];
+
     NSTextField *title = [self labelWithFrame:NSMakeRect(24, 374, 332, 28) font:[NSFont systemFontOfSize:21 weight:NSFontWeightBold] color:DTPrimaryTextColor() alignment:NSTextAlignmentCenter];
     title.stringValue = @"下班前充一下电";
     [view addSubview:title];
@@ -1360,6 +1385,10 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
 }
 
 - (void)okPressed:(id)sender {
+    [self close];
+}
+
+- (void)closePressed:(id)sender {
     [self close];
 }
 
