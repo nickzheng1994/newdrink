@@ -15,6 +15,7 @@ static NSString * const kCompletedTodayMl = @"completedTodayMl";
 static NSString * const kLastResetDay = @"lastResetDay";
 static NSString * const kDrinkRecords = @"drinkRecords";
 static NSString * const kOnboardingComplete = @"onboardingComplete";
+static NSString * const kRepairedInitTimeOverwriteBug = @"repairedInitTimeOverwriteBug";
 static const NSInteger kDailyTargetDefaultMl = 2000;
 static const NSInteger kDailyTargetMaxMl = 5000;
 static const NSInteger kReminderAmountMl = 250;
@@ -101,19 +102,28 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
     if (!self) { return nil; }
 
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-    self.startHour = [defaults objectForKey:kStartHour] ? [defaults integerForKey:kStartHour] : 9;
-    self.endHour = [defaults objectForKey:kEndHour] ? [defaults integerForKey:kEndHour] : 17;
-    self.endMinute = [defaults objectForKey:kEndMinute] ? [defaults integerForKey:kEndMinute] : 30;
-    self.lunchStartHour = [defaults objectForKey:kLunchStartHour] ? [defaults integerForKey:kLunchStartHour] : 11;
-    self.lunchStartMinute = [defaults objectForKey:kLunchStartMinute] ? [defaults integerForKey:kLunchStartMinute] : 30;
-    self.lunchEndHour = [defaults objectForKey:kLunchEndHour] ? [defaults integerForKey:kLunchEndHour] : 13;
-    self.lunchEndMinute = [defaults objectForKey:kLunchEndMinute] ? [defaults integerForKey:kLunchEndMinute] : 30;
-    self.reminderIntervalMinutes = [defaults objectForKey:kReminderIntervalMinutes] ? [defaults integerForKey:kReminderIntervalMinutes] : 60;
-    self.dailyTargetMl = [defaults objectForKey:kDailyTargetMl] ? [defaults integerForKey:kDailyTargetMl] : kDailyTargetDefaultMl;
+    _startHour = [defaults objectForKey:kStartHour] ? [defaults integerForKey:kStartHour] : 9;
+    _endHour = [defaults objectForKey:kEndHour] ? [defaults integerForKey:kEndHour] : 17;
+    _endMinute = [defaults objectForKey:kEndMinute] ? [defaults integerForKey:kEndMinute] : 30;
+    _lunchStartHour = [defaults objectForKey:kLunchStartHour] ? [defaults integerForKey:kLunchStartHour] : 11;
+    _lunchStartMinute = [defaults objectForKey:kLunchStartMinute] ? [defaults integerForKey:kLunchStartMinute] : 30;
+    _lunchEndHour = [defaults objectForKey:kLunchEndHour] ? [defaults integerForKey:kLunchEndHour] : 13;
+    _lunchEndMinute = [defaults objectForKey:kLunchEndMinute] ? [defaults integerForKey:kLunchEndMinute] : 30;
+    NSInteger savedInterval = [defaults objectForKey:kReminderIntervalMinutes] ? [defaults integerForKey:kReminderIntervalMinutes] : 60;
+    _reminderIntervalMinutes = savedInterval == 15 || savedInterval == 30 || savedInterval == 60 ? savedInterval : 60;
+    NSInteger savedTarget = [defaults objectForKey:kDailyTargetMl] ? [defaults integerForKey:kDailyTargetMl] : kDailyTargetDefaultMl;
+    _dailyTargetMl = MIN(kDailyTargetMaxMl, MAX(500, savedTarget));
     if (![defaults boolForKey:kOnboardingComplete]) {
-        self.startHour = 9;
-        self.endHour = 17;
-        self.endMinute = 30;
+        _startHour = 9;
+        _endHour = 17;
+        _endMinute = 30;
+    } else if (![defaults boolForKey:kRepairedInitTimeOverwriteBug] && _startHour == 9 && _endHour == 10 && _endMinute == 0) {
+        _endHour = 17;
+        _endMinute = 30;
+        [defaults setInteger:_endHour forKey:kEndHour];
+        [defaults setInteger:_endMinute forKey:kEndMinute];
+        [defaults setBool:YES forKey:kRepairedInitTimeOverwriteBug];
+        [defaults synchronize];
     }
     NSInteger legacyCompleted = [defaults objectForKey:kCompletedTodayMl] ? [defaults integerForKey:kCompletedTodayMl] : 0;
     if (![defaults objectForKey:kDrinkRecords] && legacyCompleted > 0) {
