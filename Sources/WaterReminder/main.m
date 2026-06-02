@@ -987,11 +987,6 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
     NSView *view = DTGlassPanel(NSMakeRect(0, 0, 380, 450), 30);
     self.window.contentView = view;
 
-    NSButton *closeButton = [self buttonWithTitle:@"×" frame:NSMakeRect(326, 402, 34, 34) action:@selector(closePressed:)];
-    closeButton.bezelStyle = NSBezelStyleCircular;
-    closeButton.font = [NSFont systemFontOfSize:18 weight:NSFontWeightBold];
-    [view addSubview:closeButton];
-
     self.titleLabel = [self labelWithFrame:NSMakeRect(24, 404, 332, 28) font:[NSFont systemFontOfSize:20 weight:NSFontWeightBold] color:DTPrimaryTextColor() alignment:NSTextAlignmentCenter];
     self.titleLabel.stringValue = @"该喝水了";
     [view addSubview:self.titleLabel];
@@ -1021,6 +1016,11 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
 
     self.snoozeButton = [self buttonWithTitle:@"稍后 5 分钟" frame:NSMakeRect(132, 22, 116, 32) action:@selector(snoozePressed:)];
     [view addSubview:self.snoozeButton];
+
+    NSButton *closeButton = [self buttonWithTitle:@"×" frame:NSMakeRect(326, 402, 34, 34) action:@selector(closePressed:)];
+    closeButton.bezelStyle = NSBezelStyleCircular;
+    closeButton.font = [NSFont systemFontOfSize:18 weight:NSFontWeightBold];
+    [view addSubview:closeButton positioned:NSWindowAbove relativeTo:nil];
 
     [self refresh];
 }
@@ -1158,11 +1158,6 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
     NSView *view = DTGlassPanel(NSMakeRect(0, 0, 380, 460), 30);
     self.window.contentView = view;
 
-    NSButton *closeButton = [self buttonWithTitle:@"×" frame:NSMakeRect(326, 412, 34, 34) action:@selector(closePressed:)];
-    closeButton.bezelStyle = NSBezelStyleCircular;
-    closeButton.font = [NSFont systemFontOfSize:18 weight:NSFontWeightBold];
-    [view addSubview:closeButton];
-
     NSTextField *title = [self labelWithFrame:NSMakeRect(24, 412, 332, 28) font:[NSFont systemFontOfSize:21 weight:NSFontWeightBold] color:DTPrimaryTextColor() alignment:NSTextAlignmentCenter];
     title.stringValue = @"今天喝水统计";
     [view addSubview:title];
@@ -1205,6 +1200,11 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
     note.maximumNumberOfLines = 2;
     note.stringValue = @"辛苦啦。今天的每一杯水，都是你认真照顾自己的证据。";
     [view addSubview:note];
+
+    NSButton *closeButton = [self buttonWithTitle:@"×" frame:NSMakeRect(326, 412, 34, 34) action:@selector(closePressed:)];
+    closeButton.bezelStyle = NSBezelStyleCircular;
+    closeButton.font = [NSFont systemFontOfSize:18 weight:NSFontWeightBold];
+    [view addSubview:closeButton positioned:NSWindowAbove relativeTo:nil];
 }
 
 - (void)closePressed:(id)sender {
@@ -1363,11 +1363,6 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
     NSView *view = DTGlassPanel(NSMakeRect(0, 0, 380, 430), 30);
     self.window.contentView = view;
 
-    NSButton *closeButton = [self buttonWithTitle:@"×" frame:NSMakeRect(326, 382, 34, 34) action:@selector(closePressed:)];
-    closeButton.bezelStyle = NSBezelStyleCircular;
-    closeButton.font = [NSFont systemFontOfSize:18 weight:NSFontWeightBold];
-    [view addSubview:closeButton];
-
     NSTextField *title = [self labelWithFrame:NSMakeRect(24, 374, 332, 28) font:[NSFont systemFontOfSize:21 weight:NSFontWeightBold] color:DTPrimaryTextColor() alignment:NSTextAlignmentCenter];
     title.stringValue = @"下班前充一下电";
     [view addSubview:title];
@@ -1382,6 +1377,11 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
 
     NSButton *okButton = [self buttonWithTitle:@"知道了" frame:NSMakeRect(132, 34, 116, 36) action:@selector(okPressed:)];
     [view addSubview:okButton];
+
+    NSButton *closeButton = [self buttonWithTitle:@"×" frame:NSMakeRect(326, 382, 34, 34) action:@selector(closePressed:)];
+    closeButton.bezelStyle = NSBezelStyleCircular;
+    closeButton.font = [NSFont systemFontOfSize:18 weight:NSFontWeightBold];
+    [view addSubview:closeButton positioned:NSWindowAbove relativeTo:nil];
 }
 
 - (void)okPressed:(id)sender {
