@@ -1867,6 +1867,9 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
 - (void)scheduleChargeTimer;
 - (void)snoozeFiveMinutes;
 - (void)triggerTestReminder;
+- (BOOL)shouldShowDrinkReminderNow;
+- (BOOL)shouldShowSummaryNow;
+- (BOOL)shouldShowChargeReminderNow;
 @end
 
 @interface AppDelegate : NSObject <NSApplicationDelegate>
@@ -1947,25 +1950,91 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
 - (void)fireReminder {
     [self.model resetIfNeeded];
     [self.model recompute];
-    [self.appDelegate setNeedsAttention:YES];
-    [self.appDelegate showReminderWindow];
+    if ([self shouldShowDrinkReminderNow]) {
+        [self.appDelegate setNeedsAttention:YES];
+        [self.appDelegate showReminderWindow];
+    }
     [self scheduleNextTimer];
 }
 
 - (void)fireSummaryReminder {
     [self.model resetIfNeeded];
     [self.model recompute];
-    [self.appDelegate setNeedsAttention:YES];
-    [self.appDelegate showSummaryWindow];
+    if ([self shouldShowSummaryNow]) {
+        [self.appDelegate setNeedsAttention:YES];
+        [self.appDelegate showSummaryWindow];
+    }
     [self scheduleSummaryTimer];
 }
 
 - (void)fireChargeReminder {
     [self.model resetIfNeeded];
     [self.model recompute];
-    [self.appDelegate setNeedsAttention:YES];
-    [self.appDelegate showPhoneChargeWindow];
+    if ([self shouldShowChargeReminderNow]) {
+        [self.appDelegate setNeedsAttention:YES];
+        [self.appDelegate showPhoneChargeWindow];
+    }
     [self scheduleChargeTimer];
+}
+
+- (BOOL)shouldShowDrinkReminderNow {
+    NSCalendar *calendar = NSCalendar.currentCalendar;
+    NSDate *now = [NSDate date];
+    NSDateComponents *dayParts = [calendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:now];
+
+    NSDateComponents *startParts = [dayParts copy];
+    startParts.hour = self.model.startHour;
+    startParts.minute = 0;
+    startParts.second = 0;
+    NSDate *startDate = [calendar dateFromComponents:startParts];
+
+    NSDateComponents *endParts = [dayParts copy];
+    endParts.hour = self.model.endHour;
+    endParts.minute = self.model.endMinute;
+    endParts.second = 0;
+    NSDate *endDate = [calendar dateFromComponents:endParts];
+
+    if ([now compare:startDate] == NSOrderedAscending || [now compare:endDate] != NSOrderedAscending) {
+        return NO;
+    }
+
+    NSDateComponents *lunchStartParts = [dayParts copy];
+    lunchStartParts.hour = self.model.lunchStartHour;
+    lunchStartParts.minute = self.model.lunchStartMinute;
+    lunchStartParts.second = 0;
+    NSDate *lunchStartDate = [calendar dateFromComponents:lunchStartParts];
+
+    NSDateComponents *lunchEndParts = [dayParts copy];
+    lunchEndParts.hour = self.model.lunchEndHour;
+    lunchEndParts.minute = self.model.lunchEndMinute;
+    lunchEndParts.second = 0;
+    NSDate *lunchEndDate = [calendar dateFromComponents:lunchEndParts];
+
+    return !([now compare:lunchStartDate] != NSOrderedAscending && [now compare:lunchEndDate] == NSOrderedAscending);
+}
+
+- (BOOL)shouldShowSummaryNow {
+    NSCalendar *calendar = NSCalendar.currentCalendar;
+    NSDate *now = [NSDate date];
+    NSDateComponents *parts = [calendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:now];
+    parts.hour = self.model.endHour;
+    parts.minute = self.model.endMinute;
+    parts.second = 0;
+    NSDate *todayEnd = [calendar dateFromComponents:parts];
+    NSDate *latestSummary = [calendar dateByAddingUnit:NSCalendarUnitMinute value:45 toDate:todayEnd options:0];
+    return [now compare:todayEnd] != NSOrderedAscending && [now compare:latestSummary] == NSOrderedAscending;
+}
+
+- (BOOL)shouldShowChargeReminderNow {
+    NSCalendar *calendar = NSCalendar.currentCalendar;
+    NSDate *now = [NSDate date];
+    NSDateComponents *parts = [calendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:now];
+    parts.hour = self.model.endHour;
+    parts.minute = self.model.endMinute;
+    parts.second = 0;
+    NSDate *todayEnd = [calendar dateFromComponents:parts];
+    NSDate *todayCharge = [calendar dateByAddingUnit:NSCalendarUnitMinute value:-30 toDate:todayEnd options:0];
+    return [now compare:todayCharge] != NSOrderedAscending && [now compare:todayEnd] == NSOrderedAscending;
 }
 
 - (NSDate *)nextSummaryDate {
