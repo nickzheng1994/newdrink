@@ -14,6 +14,7 @@ static NSString * const kDailyTargetMl = @"dailyTargetMl";
 static NSString * const kCompletedTodayMl = @"completedTodayMl";
 static NSString * const kLastResetDay = @"lastResetDay";
 static NSString * const kDrinkRecords = @"drinkRecords";
+static NSString * const kReminderLogs = @"reminderLogs";
 static NSString * const kOnboardingComplete = @"onboardingComplete";
 static NSString * const kRepairedInitTimeOverwriteBug = @"repairedInitTimeOverwriteBug";
 static const NSInteger kDailyTargetDefaultMl = 2000;
@@ -32,6 +33,14 @@ static NSColor *DTPrimaryTextColor(void) {
 
 static NSColor *DTSecondaryTextColor(void) {
     return [NSColor colorWithCalibratedWhite:0.28 alpha:1.0];
+}
+
+static NSString *DTFormattedDate(NSDate *date) {
+    if (!date) { return @"-"; }
+    NSDateFormatter *formatter = [NSDateFormatter new];
+    formatter.locale = [NSLocale localeWithLocaleIdentifier:@"zh_CN"];
+    formatter.dateFormat = @"yyyy-MM-dd HH:mm:ss";
+    return [formatter stringFromDate:date];
 }
 
 static void DTConfigureGlassWindow(NSWindow *window) {
@@ -361,7 +370,13 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
     NSMutableArray *result = [NSMutableArray array];
     NSInteger start = self.startHour;
     NSInteger end = self.endHour + (self.endMinute > 0 ? 1 : 0);
+    NSInteger lunchStartMinutes = self.lunchStartHour * 60 + self.lunchStartMinute;
+    NSInteger lunchEndMinutes = self.lunchEndHour * 60 + self.lunchEndMinute;
     for (NSInteger hour = start; hour <= MIN(23, end); hour++) {
+        NSInteger hourStartMinutes = hour * 60;
+        if (hourStartMinutes >= lunchStartMinutes && hourStartMinutes < lunchEndMinutes) {
+            continue;
+        }
         [result addObject:@{
             @"hour": @(hour),
             @"amount": hourTotals[@(hour)] ?: @0
@@ -410,11 +425,8 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
     NSDate *candidate = startDate;
     NSInteger interval = MAX(15, self.reminderIntervalMinutes);
     while ([candidate compare:endDate] == NSOrderedAscending) {
-        if ([candidate compare:lunchStartDate] != NSOrderedAscending && [candidate compare:lunchEndDate] == NSOrderedAscending) {
-            candidate = lunchEndDate;
-            continue;
-        }
-        if (!date || [candidate compare:date] == NSOrderedDescending) {
+        BOOL inLunch = [candidate compare:lunchStartDate] != NSOrderedAscending && [candidate compare:lunchEndDate] == NSOrderedAscending;
+        if (!inLunch && (!date || [candidate compare:date] == NSOrderedDescending)) {
             return candidate;
         }
         candidate = [calendar dateByAddingUnit:NSCalendarUnitMinute value:interval toDate:candidate options:0];
@@ -566,6 +578,7 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
 @property (nonatomic, strong) NSDate *celebrationStartDate;
 @property (nonatomic) CGFloat wavePhase;
 @property (nonatomic) CGFloat displayProgressOverride;
+@property (nonatomic, copy) void (^tapHandler)(void);
 - (void)celebrate;
 @end
 
@@ -582,6 +595,10 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
 }
 
 - (BOOL)isFlipped { return YES; }
+
+- (void)mouseDown:(NSEvent *)event {
+    if (self.tapHandler) { self.tapHandler(); }
+}
 
 - (void)dealloc {
     [self.animationTimer invalidate];
@@ -767,6 +784,8 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
 @property (nonatomic, strong) DrinkChartView *chartView;
 @property (nonatomic, strong) NSTextField *chartLabel;
 @property (nonatomic, strong) NSSegmentedControl *chartModeControl;
+@property (nonatomic) NSInteger cupTapCount;
+@property (nonatomic, strong) NSTimer *cupTapResetTimer;
 @property (copy) void (^settingsHandler)(void);
 @property (copy) void (^testHandler)(void);
 @end
@@ -789,6 +808,10 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
 
     self.cupView = [[CupView alloc] initWithModel:self.model];
     self.cupView.frame = NSMakeRect(105, 430, 130, 170);
+    __weak typeof(self) weakSelf = self;
+    self.cupView.tapHandler = ^{
+        [weakSelf handleCupHiddenTap];
+    };
     [view addSubview:self.cupView];
 
     self.amountLabel = [self labelWithFrame:NSMakeRect(20, 404, 300, 22) font:[NSFont systemFontOfSize:15 weight:NSFontWeightSemibold] color:NSColor.labelColor alignment:NSTextAlignmentCenter];
@@ -948,6 +971,51 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
 
 - (void)testPressed:(id)sender {
     if (self.testHandler) { self.testHandler(); }
+}
+
+- (void)handleCupHiddenTap {
+    [self.cupTapResetTimer invalidate];
+    self.cupTapCount += 1;
+    if (self.cupTapCount >= 3) {
+        self.cupTapCount = 0;
+        [self copyReminderLogsPressed:nil];
+        return;
+    }
+    self.cupTapResetTimer = [NSTimer scheduledTimerWithTimeInterval:1.2 repeats:NO block:^(NSTimer * _Nonnull timer) {
+        self.cupTapCount = 0;
+    }];
+}
+
+- (void)copyReminderLogsPressed:(id)sender {
+    NSArray<NSDictionary *> *logs = [NSUserDefaults.standardUserDefaults arrayForKey:kReminderLogs] ?: @[];
+    NSMutableArray<NSString *> *lines = [NSMutableArray array];
+    NSInteger start = MAX(0, (NSInteger)logs.count - 80);
+    for (NSInteger i = start; i < (NSInteger)logs.count; i++) {
+        NSDictionary *entry = logs[i];
+        NSString *line = [NSString stringWithFormat:@"[%@] type=%@ event=%@ scheduled=%@ show=%@ reason=%@ work=%@ lunch=%@ interval=%@ completed=%@/%@ml",
+                          entry[@"firedAt"] ?: @"-",
+                          entry[@"type"] ?: @"-",
+                          entry[@"event"] ?: @"-",
+                          entry[@"scheduledAt"] ?: @"-",
+                          [entry[@"shouldShow"] boolValue] ? @"YES" : @"NO",
+                          entry[@"reason"] ?: @"",
+                          entry[@"workTime"] ?: @"-",
+                          entry[@"lunchTime"] ?: @"-",
+                          entry[@"intervalMinutes"] ?: @"-",
+                          entry[@"completedMl"] ?: @"-",
+                          entry[@"targetMl"] ?: @"-"];
+        [lines addObject:line];
+    }
+    NSString *text = lines.count > 0 ? [lines componentsJoinedByString:@"\n"] : @"暂无提醒日志";
+    NSPasteboard *pasteboard = NSPasteboard.generalPasteboard;
+    [pasteboard clearContents];
+    [pasteboard setString:text forType:NSPasteboardTypeString];
+
+    NSAlert *alert = [NSAlert new];
+    alert.messageText = @"提醒日志已复制";
+    alert.informativeText = lines.count > 0 ? @"已复制最近 80 条提醒日志，可以直接粘贴给我排查。" : @"当前还没有提醒日志。";
+    [alert addButtonWithTitle:@"知道了"];
+    [alert runModal];
 }
 
 - (void)clearCacheAndQuitPressed:(id)sender {
@@ -1870,6 +1938,10 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
 - (BOOL)shouldShowDrinkReminderNow;
 - (BOOL)shouldShowSummaryNow;
 - (BOOL)shouldShowChargeReminderNow;
+- (NSString *)drinkReminderSkipReasonNow;
+- (NSString *)summarySkipReasonNow;
+- (NSString *)chargeReminderSkipReasonNow;
+- (void)appendReminderLogWithType:(NSString *)type event:(NSString *)event scheduledDate:(NSDate *)scheduledDate shouldShow:(BOOL)shouldShow reason:(NSString *)reason;
 @end
 
 @interface AppDelegate : NSObject <NSApplicationDelegate>
@@ -1915,7 +1987,8 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
     [self.model recompute];
     NSDate *next = [self.model nextReminderDate];
     NSTimeInterval interval = MAX(1, next.timeIntervalSinceNow);
-    self.timer = [NSTimer scheduledTimerWithTimeInterval:interval target:self selector:@selector(fireReminder) userInfo:nil repeats:NO];
+    self.timer = [NSTimer scheduledTimerWithTimeInterval:interval target:self selector:@selector(fireReminder) userInfo:@{@"scheduledAt": next} repeats:NO];
+    [self appendReminderLogWithType:@"drink" event:@"schedule" scheduledDate:next shouldShow:YES reason:@"排定喝水提醒"];
     [self.appDelegate.panelController refresh];
 }
 
@@ -1923,19 +1996,23 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
     [self.summaryTimer invalidate];
     NSDate *next = [self nextSummaryDate];
     NSTimeInterval interval = MAX(1, next.timeIntervalSinceNow);
-    self.summaryTimer = [NSTimer scheduledTimerWithTimeInterval:interval target:self selector:@selector(fireSummaryReminder) userInfo:nil repeats:NO];
+    self.summaryTimer = [NSTimer scheduledTimerWithTimeInterval:interval target:self selector:@selector(fireSummaryReminder) userInfo:@{@"scheduledAt": next} repeats:NO];
+    [self appendReminderLogWithType:@"summary" event:@"schedule" scheduledDate:next shouldShow:YES reason:@"排定下班统计"];
 }
 
 - (void)scheduleChargeTimer {
     [self.chargeTimer invalidate];
     NSDate *next = [self nextChargeDate];
     NSTimeInterval interval = MAX(1, next.timeIntervalSinceNow);
-    self.chargeTimer = [NSTimer scheduledTimerWithTimeInterval:interval target:self selector:@selector(fireChargeReminder) userInfo:nil repeats:NO];
+    self.chargeTimer = [NSTimer scheduledTimerWithTimeInterval:interval target:self selector:@selector(fireChargeReminder) userInfo:@{@"scheduledAt": next} repeats:NO];
+    [self appendReminderLogWithType:@"charge" event:@"schedule" scheduledDate:next shouldShow:YES reason:@"排定手机充电提醒"];
 }
 
 - (void)snoozeFiveMinutes {
     [self.timer invalidate];
-    self.timer = [NSTimer scheduledTimerWithTimeInterval:5 * 60 target:self selector:@selector(fireReminder) userInfo:nil repeats:NO];
+    NSDate *next = [NSDate dateWithTimeIntervalSinceNow:5 * 60];
+    self.timer = [NSTimer scheduledTimerWithTimeInterval:5 * 60 target:self selector:@selector(fireReminder) userInfo:@{@"scheduledAt": next} repeats:NO];
+    [self appendReminderLogWithType:@"drink" event:@"snooze" scheduledDate:next shouldShow:YES reason:@"稍后 5 分钟提醒"];
     [self.appDelegate setNeedsAttention:YES];
 }
 
@@ -1943,6 +2020,7 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
     NSLog(@"WaterReminder test reminder triggered");
     [self.model resetIfNeeded];
     [self.model recompute];
+    [self appendReminderLogWithType:@"drink" event:@"test" scheduledDate:nil shouldShow:YES reason:@"手动测试提醒"];
     [self.appDelegate setNeedsAttention:YES];
     [self.appDelegate showReminderWindow];
 }
@@ -1950,7 +2028,16 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
 - (void)fireReminder {
     [self.model resetIfNeeded];
     [self.model recompute];
-    if ([self shouldShowDrinkReminderNow]) {
+    NSDate *scheduledDate = self.timer.userInfo[@"scheduledAt"];
+    NSString *skipReason = nil;
+    if (scheduledDate && [[NSDate date] timeIntervalSinceDate:scheduledDate] > 5 * 60) {
+        skipReason = @"喝水提醒已错过，不补弹";
+    } else {
+        skipReason = [self drinkReminderSkipReasonNow];
+    }
+    BOOL shouldShow = skipReason == nil;
+    [self appendReminderLogWithType:@"drink" event:@"fire" scheduledDate:scheduledDate shouldShow:shouldShow reason:skipReason ?: @"弹出喝水提醒"];
+    if (shouldShow) {
         [self.appDelegate setNeedsAttention:YES];
         [self.appDelegate showReminderWindow];
     }
@@ -1960,7 +2047,11 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
 - (void)fireSummaryReminder {
     [self.model resetIfNeeded];
     [self.model recompute];
-    if ([self shouldShowSummaryNow]) {
+    NSDate *scheduledDate = self.summaryTimer.userInfo[@"scheduledAt"];
+    NSString *skipReason = [self summarySkipReasonNow];
+    BOOL shouldShow = skipReason == nil;
+    [self appendReminderLogWithType:@"summary" event:@"fire" scheduledDate:scheduledDate shouldShow:shouldShow reason:skipReason ?: @"弹出下班统计"];
+    if (shouldShow) {
         [self.appDelegate setNeedsAttention:YES];
         [self.appDelegate showSummaryWindow];
     }
@@ -1970,7 +2061,11 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
 - (void)fireChargeReminder {
     [self.model resetIfNeeded];
     [self.model recompute];
-    if ([self shouldShowChargeReminderNow]) {
+    NSDate *scheduledDate = self.chargeTimer.userInfo[@"scheduledAt"];
+    NSString *skipReason = [self chargeReminderSkipReasonNow];
+    BOOL shouldShow = skipReason == nil;
+    [self appendReminderLogWithType:@"charge" event:@"fire" scheduledDate:scheduledDate shouldShow:shouldShow reason:skipReason ?: @"弹出手机充电提醒"];
+    if (shouldShow) {
         [self.appDelegate setNeedsAttention:YES];
         [self.appDelegate showPhoneChargeWindow];
     }
@@ -1978,6 +2073,10 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
 }
 
 - (BOOL)shouldShowDrinkReminderNow {
+    return [self drinkReminderSkipReasonNow] == nil;
+}
+
+- (NSString *)drinkReminderSkipReasonNow {
     NSCalendar *calendar = NSCalendar.currentCalendar;
     NSDate *now = [NSDate date];
     NSDateComponents *dayParts = [calendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:now];
@@ -1995,7 +2094,7 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
     NSDate *endDate = [calendar dateFromComponents:endParts];
 
     if ([now compare:startDate] == NSOrderedAscending || [now compare:endDate] != NSOrderedAscending) {
-        return NO;
+        return @"当前不在工作时间内";
     }
 
     NSDateComponents *lunchStartParts = [dayParts copy];
@@ -2010,10 +2109,17 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
     lunchEndParts.second = 0;
     NSDate *lunchEndDate = [calendar dateFromComponents:lunchEndParts];
 
-    return !([now compare:lunchStartDate] != NSOrderedAscending && [now compare:lunchEndDate] == NSOrderedAscending);
+    if ([now compare:lunchStartDate] != NSOrderedAscending && [now compare:lunchEndDate] == NSOrderedAscending) {
+        return @"当前处于午休时间";
+    }
+    return nil;
 }
 
 - (BOOL)shouldShowSummaryNow {
+    return [self summarySkipReasonNow] == nil;
+}
+
+- (NSString *)summarySkipReasonNow {
     NSCalendar *calendar = NSCalendar.currentCalendar;
     NSDate *now = [NSDate date];
     NSDateComponents *parts = [calendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:now];
@@ -2022,10 +2128,20 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
     parts.second = 0;
     NSDate *todayEnd = [calendar dateFromComponents:parts];
     NSDate *latestSummary = [calendar dateByAddingUnit:NSCalendarUnitMinute value:45 toDate:todayEnd options:0];
-    return [now compare:todayEnd] != NSOrderedAscending && [now compare:latestSummary] == NSOrderedAscending;
+    if ([now compare:todayEnd] == NSOrderedAscending) {
+        return @"还没有到下班统计时间";
+    }
+    if ([now compare:latestSummary] != NSOrderedAscending) {
+        return @"下班统计触发已过期";
+    }
+    return nil;
 }
 
 - (BOOL)shouldShowChargeReminderNow {
+    return [self chargeReminderSkipReasonNow] == nil;
+}
+
+- (NSString *)chargeReminderSkipReasonNow {
     NSCalendar *calendar = NSCalendar.currentCalendar;
     NSDate *now = [NSDate date];
     NSDateComponents *parts = [calendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:now];
@@ -2034,7 +2150,40 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
     parts.second = 0;
     NSDate *todayEnd = [calendar dateFromComponents:parts];
     NSDate *todayCharge = [calendar dateByAddingUnit:NSCalendarUnitMinute value:-30 toDate:todayEnd options:0];
-    return [now compare:todayCharge] != NSOrderedAscending && [now compare:todayEnd] == NSOrderedAscending;
+    if ([now compare:todayCharge] == NSOrderedAscending) {
+        return @"还没有到下班前 30 分钟";
+    }
+    if ([now compare:todayEnd] != NSOrderedAscending) {
+        return @"手机充电提醒触发已过期";
+    }
+    return nil;
+}
+
+- (void)appendReminderLogWithType:(NSString *)type event:(NSString *)event scheduledDate:(NSDate *)scheduledDate shouldShow:(BOOL)shouldShow reason:(NSString *)reason {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSMutableArray *logs = [[defaults arrayForKey:kReminderLogs] mutableCopy] ?: [NSMutableArray array];
+    NSString *workTime = [NSString stringWithFormat:@"%02ld:00-%02ld:%02ld", self.model.startHour, self.model.endHour, self.model.endMinute];
+    NSString *lunchTime = [NSString stringWithFormat:@"%02ld:%02ld-%02ld:%02ld", self.model.lunchStartHour, self.model.lunchStartMinute, self.model.lunchEndHour, self.model.lunchEndMinute];
+    NSDictionary *entry = @{
+        @"type": type ?: @"unknown",
+        @"event": event ?: @"unknown",
+        @"scheduledAt": DTFormattedDate(scheduledDate),
+        @"firedAt": DTFormattedDate([NSDate date]),
+        @"shouldShow": @(shouldShow),
+        @"reason": reason ?: @"",
+        @"workTime": workTime,
+        @"lunchTime": lunchTime,
+        @"intervalMinutes": @(self.model.reminderIntervalMinutes),
+        @"targetMl": @(self.model.dailyTargetMl),
+        @"completedMl": @(self.model.completedTodayMl)
+    };
+    [logs addObject:entry];
+    if (logs.count > 200) {
+        [logs removeObjectsInRange:NSMakeRange(0, logs.count - 200)];
+    }
+    [defaults setObject:logs forKey:kReminderLogs];
+    [defaults synchronize];
+    NSLog(@"WaterReminder log %@", entry);
 }
 
 - (NSDate *)nextSummaryDate {
