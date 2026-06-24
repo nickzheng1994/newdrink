@@ -43,6 +43,11 @@ static NSString *DTFormattedDate(NSDate *date) {
     return [formatter stringFromDate:date];
 }
 
+static BOOL DTIsWorkday(NSDate *date) {
+    NSInteger weekday = [NSCalendar.currentCalendar component:NSCalendarUnitWeekday fromDate:date];
+    return weekday >= 2 && weekday <= 6;
+}
+
 static void DTConfigureGlassWindow(NSWindow *window) {
     window.level = NSFloatingWindowLevel;
     window.opaque = NO;
@@ -290,9 +295,8 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
 - (void)setTodayTotalByManualAdjustment:(NSInteger)targetMl {
     [self resetIfNeeded];
     NSInteger clampedTarget = MIN(self.dailyTargetMl, MAX(0, targetMl));
-    NSInteger diff = clampedTarget - self.completedTodayMl;
-    if (diff != 0) {
-        [self appendDrinkRecordWithAmount:diff kind:@"manual"];
+    if (clampedTarget != self.completedTodayMl) {
+        [self appendDrinkRecordWithAmount:clampedTarget kind:@"manualTotal"];
     }
     [self syncCompletedTodayFromRecords];
 }
@@ -320,7 +324,12 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
         if (!timestamp || !amount) { continue; }
         NSDate *date = [NSDate dateWithTimeIntervalSince1970:timestamp.doubleValue];
         if ([[self dayStamp:date] isEqualToString:stamp]) {
-            total += amount.integerValue;
+            NSString *kind = record[@"kind"] ?: @"drink";
+            if ([kind isEqualToString:@"manualTotal"]) {
+                total = amount.integerValue;
+            } else {
+                total += amount.integerValue;
+            }
         }
     }
     return MIN(self.dailyTargetMl, MAX(0, total));
@@ -354,17 +363,51 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
     NSCalendar *calendar = NSCalendar.currentCalendar;
     NSString *today = [self dayStamp:[NSDate date]];
     NSMutableDictionary<NSNumber *, NSNumber *> *hourTotals = [NSMutableDictionary dictionary];
+    NSInteger runningTotal = 0;
 
     for (NSDictionary *record in [self drinkRecords]) {
         NSNumber *timestamp = record[@"timestamp"];
         NSNumber *amount = record[@"amount"];
-        if (!timestamp || !amount || amount.integerValue <= 0) { continue; }
+        if (!timestamp || !amount) { continue; }
         NSDate *date = [NSDate dateWithTimeIntervalSince1970:timestamp.doubleValue];
         if (![[self dayStamp:date] isEqualToString:today]) { continue; }
         NSInteger hour = [calendar component:NSCalendarUnitHour fromDate:date];
         NSNumber *key = @(hour);
-        NSInteger total = (hourTotals[key] ?: @0).integerValue + amount.integerValue;
-        hourTotals[key] = @(total);
+        NSString *kind = record[@"kind"] ?: @"drink";
+        if ([kind isEqualToString:@"manualTotal"]) {
+            NSInteger diff = amount.integerValue - runningTotal;
+            if (diff > 0) {
+                NSInteger total = (hourTotals[key] ?: @0).integerValue + diff;
+                hourTotals[key] = @(total);
+            } else if (diff < 0) {
+                NSInteger remaining = -diff;
+                for (NSInteger h = hour; h >= 0 && remaining > 0; h--) {
+                    NSNumber *hourKey = @(h);
+                    NSInteger current = (hourTotals[hourKey] ?: @0).integerValue;
+                    if (current <= 0) { continue; }
+                    NSInteger subtract = MIN(current, remaining);
+                    hourTotals[hourKey] = @(current - subtract);
+                    remaining -= subtract;
+                }
+            }
+            runningTotal = MIN(self.dailyTargetMl, MAX(0, amount.integerValue));
+        } else {
+            runningTotal = MIN(self.dailyTargetMl, MAX(0, runningTotal + amount.integerValue));
+            if (amount.integerValue > 0) {
+                NSInteger total = (hourTotals[key] ?: @0).integerValue + amount.integerValue;
+                hourTotals[key] = @(total);
+            } else if (amount.integerValue < 0) {
+                NSInteger remaining = -amount.integerValue;
+                for (NSInteger h = hour; h >= 0 && remaining > 0; h--) {
+                    NSNumber *hourKey = @(h);
+                    NSInteger current = (hourTotals[hourKey] ?: @0).integerValue;
+                    if (current <= 0) { continue; }
+                    NSInteger subtract = MIN(current, remaining);
+                    hourTotals[hourKey] = @(current - subtract);
+                    remaining -= subtract;
+                }
+            }
+        }
     }
 
     NSMutableArray *result = [NSMutableArray array];
@@ -388,13 +431,16 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
 - (NSDate *)nextReminderDate {
     NSCalendar *calendar = NSCalendar.currentCalendar;
     NSDate *now = [NSDate date];
-    NSDateComponents *dayParts = [calendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:now];
-    NSDate *todayCandidate = [self nextReminderDateOnDay:dayParts after:now calendar:calendar];
-    if (todayCandidate) { return todayCandidate; }
-
-    NSDate *tomorrow = [calendar dateByAddingUnit:NSCalendarUnitDay value:1 toDate:now options:0];
-    NSDateComponents *tomorrowParts = [calendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:tomorrow];
-    return [self nextReminderDateOnDay:tomorrowParts after:nil calendar:calendar];
+    for (NSInteger offset = 0; offset < 8; offset++) {
+        NSDate *day = [calendar dateByAddingUnit:NSCalendarUnitDay value:offset toDate:now options:0];
+        if (!DTIsWorkday(day)) { continue; }
+        NSDateComponents *dayParts = [calendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:day];
+        NSDate *candidate = [self nextReminderDateOnDay:dayParts after:(offset == 0 ? now : nil) calendar:calendar];
+        if (candidate) { return candidate; }
+    }
+    NSDate *fallback = [calendar dateByAddingUnit:NSCalendarUnitDay value:1 toDate:now options:0];
+    NSDateComponents *fallbackParts = [calendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:fallback];
+    return [self nextReminderDateOnDay:fallbackParts after:nil calendar:calendar];
 }
 
 - (NSDate *)nextReminderDateOnDay:(NSDateComponents *)dayParts after:(NSDate *)date calendar:(NSCalendar *)calendar {
@@ -438,7 +484,14 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
     NSDate *next = [self nextReminderDate];
     NSDateFormatter *formatter = [NSDateFormatter new];
     formatter.locale = [NSLocale localeWithLocaleIdentifier:@"zh_CN"];
-    formatter.dateFormat = [NSCalendar.currentCalendar isDateInToday:next] ? @"今天 HH:mm" : @"明天 HH:mm";
+    NSCalendar *calendar = NSCalendar.currentCalendar;
+    if ([calendar isDateInToday:next]) {
+        formatter.dateFormat = @"今天 HH:mm";
+    } else if ([calendar isDateInTomorrow:next]) {
+        formatter.dateFormat = @"明天 HH:mm";
+    } else {
+        formatter.dateFormat = @"MM/dd HH:mm";
+    }
     return [formatter stringFromDate:next];
 }
 
@@ -2079,6 +2132,9 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
 - (NSString *)drinkReminderSkipReasonNow {
     NSCalendar *calendar = NSCalendar.currentCalendar;
     NSDate *now = [NSDate date];
+    if (!DTIsWorkday(now)) {
+        return @"周末不提醒";
+    }
     NSDateComponents *dayParts = [calendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:now];
 
     NSDateComponents *startParts = [dayParts copy];
@@ -2122,6 +2178,9 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
 - (NSString *)summarySkipReasonNow {
     NSCalendar *calendar = NSCalendar.currentCalendar;
     NSDate *now = [NSDate date];
+    if (!DTIsWorkday(now)) {
+        return @"周末不统计";
+    }
     NSDateComponents *parts = [calendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:now];
     parts.hour = self.model.endHour;
     parts.minute = self.model.endMinute;
@@ -2144,6 +2203,9 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
 - (NSString *)chargeReminderSkipReasonNow {
     NSCalendar *calendar = NSCalendar.currentCalendar;
     NSDate *now = [NSDate date];
+    if (!DTIsWorkday(now)) {
+        return @"周末不提醒手机充电";
+    }
     NSDateComponents *parts = [calendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:now];
     parts.hour = self.model.endHour;
     parts.minute = self.model.endMinute;
@@ -2189,45 +2251,38 @@ static NSVisualEffectView *DTGlassPanel(NSRect frame, CGFloat radius) {
 - (NSDate *)nextSummaryDate {
     NSCalendar *calendar = NSCalendar.currentCalendar;
     NSDate *now = [NSDate date];
-    NSDateComponents *parts = [calendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:now];
-    parts.hour = self.model.endHour;
-    parts.minute = self.model.endMinute;
-    parts.second = 0;
-
-    NSDate *todaySummary = [calendar dateFromComponents:parts];
-    if ([todaySummary compare:now] == NSOrderedDescending) {
-        return todaySummary;
+    for (NSInteger offset = 0; offset < 8; offset++) {
+        NSDate *day = [calendar dateByAddingUnit:NSCalendarUnitDay value:offset toDate:now options:0];
+        if (!DTIsWorkday(day)) { continue; }
+        NSDateComponents *parts = [calendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:day];
+        parts.hour = self.model.endHour;
+        parts.minute = self.model.endMinute;
+        parts.second = 0;
+        NSDate *candidate = [calendar dateFromComponents:parts];
+        if ([candidate compare:now] == NSOrderedDescending) {
+            return candidate;
+        }
     }
-
-    NSDate *tomorrow = [calendar dateByAddingUnit:NSCalendarUnitDay value:1 toDate:now options:0];
-    NSDateComponents *tomorrowParts = [calendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:tomorrow];
-    tomorrowParts.hour = self.model.endHour;
-    tomorrowParts.minute = self.model.endMinute;
-    tomorrowParts.second = 0;
-    return [calendar dateFromComponents:tomorrowParts];
+    return [calendar dateByAddingUnit:NSCalendarUnitDay value:1 toDate:now options:0];
 }
 
 - (NSDate *)nextChargeDate {
     NSCalendar *calendar = NSCalendar.currentCalendar;
     NSDate *now = [NSDate date];
-    NSDateComponents *parts = [calendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:now];
-    parts.hour = self.model.endHour;
-    parts.minute = self.model.endMinute;
-    parts.second = 0;
-
-    NSDate *todayEnd = [calendar dateFromComponents:parts];
-    NSDate *todayCharge = [calendar dateByAddingUnit:NSCalendarUnitMinute value:-30 toDate:todayEnd options:0];
-    if ([todayCharge compare:now] == NSOrderedDescending) {
-        return todayCharge;
+    for (NSInteger offset = 0; offset < 8; offset++) {
+        NSDate *day = [calendar dateByAddingUnit:NSCalendarUnitDay value:offset toDate:now options:0];
+        if (!DTIsWorkday(day)) { continue; }
+        NSDateComponents *parts = [calendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:day];
+        parts.hour = self.model.endHour;
+        parts.minute = self.model.endMinute;
+        parts.second = 0;
+        NSDate *endDate = [calendar dateFromComponents:parts];
+        NSDate *chargeDate = [calendar dateByAddingUnit:NSCalendarUnitMinute value:-30 toDate:endDate options:0];
+        if ([chargeDate compare:now] == NSOrderedDescending) {
+            return chargeDate;
+        }
     }
-
-    NSDate *tomorrow = [calendar dateByAddingUnit:NSCalendarUnitDay value:1 toDate:now options:0];
-    NSDateComponents *tomorrowParts = [calendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:tomorrow];
-    tomorrowParts.hour = self.model.endHour;
-    tomorrowParts.minute = self.model.endMinute;
-    tomorrowParts.second = 0;
-    NSDate *tomorrowEnd = [calendar dateFromComponents:tomorrowParts];
-    return [calendar dateByAddingUnit:NSCalendarUnitMinute value:-30 toDate:tomorrowEnd options:0];
+    return [calendar dateByAddingUnit:NSCalendarUnitDay value:1 toDate:now options:0];
 }
 
 @end
